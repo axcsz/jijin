@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { Plus, Trash2, List, LayoutDashboard, TrendingUp, Wallet, Lock, Sun, Moon, FileUp, FileDown, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, List, LayoutDashboard, TrendingUp, Wallet, Lock, Sun, Moon, FileUp, FileDown, RefreshCw, Settings } from 'lucide-react';
 import { Transaction, FundHolding, TransactionAction, Account } from './types';
 
 // The password to access the app (Set this in Cloudflare Pages Environment Variables as APP_ADMIN)
@@ -182,6 +182,8 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [currentNavs, setCurrentNavs] = useState<Record<string, number>>({});
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [isManagingAccounts, setIsManagingAccounts] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
 
   useEffect(() => {
     if (kvStatus === 'enabled') {
@@ -190,6 +192,7 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
         .then(data => {
            if (data.transactions) setTransactions(data.transactions);
            if (data.currentNavs) setCurrentNavs(data.currentNavs);
+           if (data.accounts) setAccounts(data.accounts);
            setDataLoaded(true);
         })
         .catch(err => {
@@ -205,6 +208,10 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
       if (savedNavs) {
         try { setCurrentNavs(JSON.parse(savedNavs)); } catch (e) {}
       }
+      const savedAccounts = localStorage.getItem('fund_accounts');
+      if (savedAccounts) {
+        try { setAccounts(JSON.parse(savedAccounts)); } catch (e) {}
+      }
       setDataLoaded(true);
     }
   }, [kvStatus, password]);
@@ -215,13 +222,14 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
        fetch('/api/data', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json', 'Authorization': password },
-         body: JSON.stringify({ transactions, currentNavs })
+         body: JSON.stringify({ transactions, currentNavs, accounts })
        }).catch(err => console.error(err));
     } else {
        localStorage.setItem('fund_transactions', JSON.stringify(transactions));
        localStorage.setItem('fund_navs', JSON.stringify(currentNavs));
+       localStorage.setItem('fund_accounts', JSON.stringify(accounts));
     }
-  }, [transactions, currentNavs, kvStatus, password, dataLoaded, readonly]);
+  }, [transactions, currentNavs, accounts, kvStatus, password, dataLoaded, readonly]);
 
   const [isAdding, setIsAdding] = useState(false);
 
@@ -449,6 +457,15 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
                   {acc.name}
                 </button>
               ))}
+              {!readonly && (
+                <button
+                  className="flex items-center gap-2 px-4 py-2 text-xs font-bold transition-colors border-l border-[#1A1A1A] text-gray-400 hover:text-[#D43F33]"
+                  onClick={() => setIsManagingAccounts(true)}
+                  title="管理账户"
+                >
+                  <Settings size={12} />
+                </button>
+              )}
             </div>
 
             <div className="flex gap-4">
@@ -611,7 +628,7 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
                    onClick={() => {
                      setIsAdding(!isAdding);
                      if (!isAdding) {
-                       setNewTx(prev => ({...prev, accountId: activeAccountId === 'all' ? accounts[0].id : activeAccountId}));
+                       setNewTx(prev => ({...prev, accountId: activeAccountId === 'all' ? (accounts[0]?.id || 'default') : activeAccountId}));
                      }
                    }}
                  >
@@ -733,7 +750,7 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
                                     ...newTx, 
                                     id: Math.random().toString(36).substr(2,9)
                                   } as Transaction]);
-                                  setNewTx({accountId: activeAccountId === 'all' ? accounts[0].id : activeAccountId, date: new Date().toISOString().split('T')[0], action: '买入', amount: 0, nav: 0, shares:0, isDividend:'否', cashFlow: 0, fundCode: '', fundName: ''});
+                                  setNewTx({accountId: activeAccountId === 'all' ? (accounts[0]?.id || 'default') : activeAccountId, date: new Date().toISOString().split('T')[0], action: '买入', amount: 0, nav: 0, shares:0, isDividend:'否', cashFlow: 0, fundCode: '', fundName: ''});
                                   setIsAdding(false);
                                 }
                               }}
@@ -785,6 +802,65 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
         )}
 
       </div>
+
+      {isManagingAccounts && !readonly && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-[#0A0A0A] border border-gray-200 dark:border-[#2A2A2A] p-8 w-full max-w-md shadow-2xl relative">
+            <button 
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-900 dark:hover:text-[#E0E0E0] transition-colors"
+              onClick={() => setIsManagingAccounts(false)}
+            >
+              ✖
+            </button>
+            <h2 className="text-2xl font-serif italic mb-6 text-gray-900 dark:text-[#E0E0E0]">账号管理</h2>
+            
+            <div className="flex flex-col gap-4 mb-6">
+              {accounts.map(acc => (
+                <div key={acc.id} className="flex justify-between items-center group">
+                  <span className="font-mono text-sm text-gray-700 dark:text-[#AAA]">{acc.name}</span>
+                  {accounts.length > 1 && (
+                    <button 
+                      className="text-gray-400 hover:text-[#D43F33] opacity-0 group-hover:opacity-100 transition-all p-2"
+                      onClick={() => {
+                        const newAccounts = accounts.filter(a => a.id !== acc.id);
+                        setAccounts(newAccounts);
+                        setTransactions(transactions.filter(t => t.accountId !== acc.id));
+                        if (activeAccountId === acc.id) {
+                          setActiveAccountId('all');
+                        }
+                      }}
+                      title="删除账号"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2 border-t border-gray-200 dark:border-[#2A2A2A] pt-6">
+              <input 
+                type="text" 
+                placeholder="新账号名称" 
+                className="flex-1 bg-gray-50 dark:bg-[#111] border border-gray-300 dark:border-[#333] text-gray-900 dark:text-[#E0E0E0] px-4 py-2 text-sm outline-none focus:border-[#D43F33] transition-colors"
+                value={newAccountName}
+                onChange={e => setNewAccountName(e.target.value)}
+              />
+              <button 
+                className="bg-[#D43F33] text-white px-4 py-2 text-[10px] uppercase tracking-[0.1em] font-bold hover:bg-[#B32D22] transition-colors flex items-center gap-2"
+                onClick={() => {
+                  if (newAccountName.trim()) {
+                    setAccounts([...accounts, { id: Math.random().toString(36).substr(2, 9), name: newAccountName.trim() }]);
+                    setNewAccountName('');
+                  }
+                }}
+              >
+                <Plus size={14} /> 添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
