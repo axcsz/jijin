@@ -50,15 +50,10 @@ async function handleApiRequest(request, env) {
       }
     }
 
-    // Verify Authorization header for data access
+    // Verify Authorization header for data access (POST only)
     const authHeader = request.headers.get('Authorization') || '';
     const expectedPassword = env.ADMIN || '';
     
-    // Check if the expected password is set and matches
-    if (expectedPassword && authHeader !== expectedPassword) {
-       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-    }
-
     // Data Endpoint
     if (url.pathname === '/api/data') {
       if (!env.KV) {
@@ -73,6 +68,11 @@ async function handleApiRequest(request, env) {
       } 
       
       if (request.method === 'POST') {
+        // Check if the expected password is set and matches
+        if (expectedPassword && authHeader !== expectedPassword) {
+           return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+        }
+
         const data = await request.text();
         await env.KV.put('fund_data', data);
         return new Response(JSON.stringify({ success: true }), {
