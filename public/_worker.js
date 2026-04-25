@@ -50,6 +50,29 @@ async function handleApiRequest(request, env) {
       }
     }
 
+    if (url.pathname === '/api/nav') {
+      const code = url.searchParams.get('code');
+      if (!code) return new Response(JSON.stringify({ error: 'Missing code' }), { status: 400, headers: corsHeaders });
+      
+      try {
+        // Fetch from EastMoney API
+        const targetUrl = `http://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`;
+        const fetchRes = await fetch(targetUrl, {
+          headers: {
+            'Referer': 'http://fund.eastmoney.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        });
+        
+        const textData = await fetchRes.text();
+        return new Response(textData, {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+      }
+    }
+
     // Verify Authorization header for data access (POST only)
     const authHeader = request.headers.get('Authorization') || '';
     const expectedPassword = env.ADMIN || '';
