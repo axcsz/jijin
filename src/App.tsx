@@ -328,27 +328,18 @@ function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { them
 
   const [isFetchingNav, setIsFetchingNav] = useState(false);
 
-  const fetchFundNav = (code: string): Promise<number | null> => {
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      const callbackName = 'jsonpgz';
-      const originalCallback = (window as any)[callbackName];
-      
-      (window as any)[callbackName] = (data: any) => {
-        resolve(parseFloat(data.dwjz));
-        (window as any)[callbackName] = originalCallback;
-        script.remove();
-      };
-      
-      script.onerror = () => {
-        resolve(null);
-        (window as any)[callbackName] = originalCallback;
-        script.remove();
-      };
-      
-      script.src = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
-      document.body.appendChild(script);
-    });
+  const fetchFundNav = async (code: string): Promise<number | null> => {
+    try {
+      const res = await fetch(`/api/nav?code=${code}`);
+      const data = await res.json();
+      if (data && data.Data && data.Data.LSJZList && data.Data.LSJZList.length > 0) {
+        return parseFloat(data.Data.LSJZList[0].DWJZ);
+      }
+      return null;
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
   };
 
   const handleAutoFetchNavs = async () => {
