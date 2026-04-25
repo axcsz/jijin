@@ -1,0 +1,6 @@
+{
+  "name": "个人基金投资组合管理",
+  "description": "基于用户需求完善的基金投资组合管理工具，支持资产自动计算、大类资产配置可视化等功能。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
