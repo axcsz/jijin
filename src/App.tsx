@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { Plus, Trash2, List, LayoutDashboard, TrendingUp, Wallet, Lock, Sun, Moon, FileUp, FileDown } from 'lucide-react';
+import { Plus, Trash2, List, LayoutDashboard, TrendingUp, Wallet, Lock, Sun, Moon, FileUp, FileDown, RefreshCw } from 'lucide-react';
 import { Transaction, FundHolding, TransactionAction, Account } from './types';
 
 // The password to access the app (Set this in Cloudflare Pages Environment Variables as APP_ADMIN)
@@ -21,7 +21,20 @@ const INITIAL_TRANSACTIONS: Transaction[] = [
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isReady, setIsReady] = useState(false);
+  const [isAdminMode, setIsAdminMode] = useState(window.location.pathname.startsWith('/admin') || window.location.hash.startsWith('#/admin'));
   const [kvStatus, setKvStatus] = useState<'checking' | 'enabled' | 'disabled'>('checking');
+  
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setIsAdminMode(window.location.pathname.startsWith('/admin') || window.location.hash.startsWith('#/admin'));
+    };
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
+  }, []);
   const [passwordInput, setPasswordInput] = useState('');
   const [errorVisible, setErrorVisible] = useState(false);
 
@@ -119,7 +132,7 @@ export default function App() {
 
   if (!isReady) return <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 dark:bg-[#0F0F0F] text-gray-500 dark:text-[#888]">Loading...</div>;
 
-  if (!isAuthenticated) {
+  if (isAdminMode && !isAuthenticated) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-[#0F0F0F] flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-sm flex justify-end mb-4">
@@ -159,14 +172,15 @@ export default function App() {
     );
   }
 
-  return <FundDashboard theme={theme} setTheme={setTheme} kvStatus={kvStatus as 'enabled'|'disabled'} password={passwordInput} />;
+  return <FundDashboard theme={theme} setTheme={setTheme} kvStatus={kvStatus as 'enabled'|'disabled'} password={passwordInput} readonly={!isAdminMode} />;
 }
 
-function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light' | 'dark', setTheme: (t: 'light' | 'dark') => void, kvStatus: 'enabled' | 'disabled', password: string }) {
+function FundDashboard({ theme, setTheme, kvStatus, password, readonly }: { theme: 'light' | 'dark', setTheme: (t: 'light' | 'dark') => void, kvStatus: 'enabled' | 'disabled', password: string, readonly?: boolean }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'transactions'>('overview');
   const [accounts, setAccounts] = useState<Account[]>(INITIAL_ACCOUNTS);
   const [activeAccountId, setActiveAccountId] = useState<string>('all');
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
+  const [currentNavs, setCurrentNavs] = useState<Record<string, number>>({});
   const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
@@ -175,6 +189,7 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
         .then(res => res.json())
         .then(data => {
            if (data.transactions) setTransactions(data.transactions);
+           if (data.currentNavs) setCurrentNavs(data.currentNavs);
            setDataLoaded(true);
         })
         .catch(err => {
@@ -182,35 +197,35 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
            setDataLoaded(true);
         });
     } else {
-      const saved = localStorage.getItem('fund_transactions');
-      if (saved) {
-        try { setTransactions(JSON.parse(saved)); } catch (e) {}
+      const savedTx = localStorage.getItem('fund_transactions');
+      if (savedTx) {
+        try { setTransactions(JSON.parse(savedTx)); } catch (e) {}
+      }
+      const savedNavs = localStorage.getItem('fund_navs');
+      if (savedNavs) {
+        try { setCurrentNavs(JSON.parse(savedNavs)); } catch (e) {}
       }
       setDataLoaded(true);
     }
   }, [kvStatus, password]);
 
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded || readonly) return;
     if (kvStatus === 'enabled') {
        fetch('/api/data', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json', 'Authorization': password },
-         body: JSON.stringify({ transactions })
+         body: JSON.stringify({ transactions, currentNavs })
        }).catch(err => console.error(err));
     } else {
        localStorage.setItem('fund_transactions', JSON.stringify(transactions));
+       localStorage.setItem('fund_navs', JSON.stringify(currentNavs));
     }
-  }, [transactions, kvStatus, password, dataLoaded]);
+  }, [transactions, currentNavs, kvStatus, password, dataLoaded, readonly]);
 
   const [isAdding, setIsAdding] = useState(false);
 
   
-  // Current NAVs keyed by fund code (Based on Screenshot 2)
-  const [currentNavs, setCurrentNavs] = useState<Record<string, number>>({
-    '460300': 5.7475
-  });
-
   // Form State
   const [newTx, setNewTx] = useState<Partial<Transaction>>({
     accountId: 'default',
@@ -311,6 +326,47 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
     setCurrentNavs(prev => ({ ...prev, [code]: val }));
   };
 
+  const [isFetchingNav, setIsFetchingNav] = useState(false);
+
+  const fetchFundNav = (code: string): Promise<number | null> => {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      const callbackName = 'jsonpgz';
+      const originalCallback = (window as any)[callbackName];
+      
+      (window as any)[callbackName] = (data: any) => {
+        resolve(parseFloat(data.dwjz));
+        (window as any)[callbackName] = originalCallback;
+        script.remove();
+      };
+      
+      script.onerror = () => {
+        resolve(null);
+        (window as any)[callbackName] = originalCallback;
+        script.remove();
+      };
+      
+      script.src = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleAutoFetchNavs = async () => {
+    setIsFetchingNav(true);
+    const newNavs = { ...currentNavs };
+    
+    // Fetch sequentially to avoid JSONP global callback collision
+    for (const h of holdings) {
+      if (!h.fundCode) continue;
+      const nav = await fetchFundNav(h.fundCode);
+      if (nav !== null && !isNaN(nav)) {
+         newNavs[h.fundCode] = nav;
+      }
+    }
+    setCurrentNavs(newNavs);
+    setIsFetchingNav(false);
+  };
+
   const handleExport = () => {
     const data = {
       transactions: transactions
@@ -405,14 +461,18 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
             </div>
 
             <div className="flex gap-4">
-              <input type="file" id="import-data" accept=".txt,.json" className="hidden" onChange={handleImport} />
-              <button 
-                className={`px-4 sm:px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-bold transition-colors flex items-center gap-2 rounded-none border border-gray-300 dark:border-[#333] text-gray-500 dark:text-[#888] hover:border-[#D43F33] hover:text-[#D43F33]`}
-                onClick={() => document.getElementById('import-data')?.click()}
-                title="导入数据"
-              >
-                <FileUp size={14} className="hidden sm:block" /> 导入
-              </button>
+              {!readonly && (
+                <>
+                  <input type="file" id="import-data" accept=".txt,.json" className="hidden" onChange={handleImport} />
+                  <button 
+                    className={`px-4 sm:px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-bold transition-colors flex items-center gap-2 rounded-none border border-gray-300 dark:border-[#333] text-gray-500 dark:text-[#888] hover:border-[#D43F33] hover:text-[#D43F33]`}
+                    onClick={() => document.getElementById('import-data')?.click()}
+                    title="导入数据"
+                  >
+                    <FileUp size={14} className="hidden sm:block" /> 导入
+                  </button>
+                </>
+              )}
               <button 
                 className={`px-4 sm:px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-bold transition-colors flex items-center gap-2 rounded-none border border-gray-300 dark:border-[#333] text-gray-500 dark:text-[#888] hover:border-[#D43F33] hover:text-[#D43F33]`}
                 onClick={handleExport}
@@ -480,7 +540,21 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
                       <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right">累计卖出</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right">分红再投</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right">持有份额</th>
-                      <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right text-[#D43F33]">当前净值</th>
+                      <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right text-[#D43F33]">
+                        <div className="flex items-center justify-end gap-2">
+                          {!readonly && (
+                            <button
+                              onClick={handleAutoFetchNavs}
+                              disabled={isFetchingNav || holdings.length === 0}
+                              className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-[#333] transition-colors ${isFetchingNav ? 'animate-spin opacity-50' : ''}`}
+                              title="自动获取最新净值 (基于天天基金数据)"
+                            >
+                              <RefreshCw size={12} />
+                            </button>
+                          )}
+                          <span>当前净值</span>
+                        </div>
+                      </th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right">当前市值</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right">成本净值</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-[0.1em] font-normal text-right text-gray-900 dark:text-[#E0E0E0]">未实现收益</th>
@@ -505,12 +579,18 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
                           <td className="px-6 py-4 text-right font-mono text-gray-800 dark:text-[#CCC]">{h.holdingShares.toFixed(2)}</td>
                           <td className="px-6 py-4 text-right">
                             {/* Editable Current NAV */}
-                            <input 
-                              type="number" step="0.0001"
-                              className="w-24 bg-gray-50 dark:bg-[#0A0A0A] border-b border-gray-300 dark:border-[#333] focus:border-[#D43F33] text-gray-900 dark:text-[#E0E0E0] px-1 py-1 text-sm font-mono outline-none text-right transition-colors"
-                              value={h.currentNav || ''}
-                              onChange={(e) => handleUpdateNav(h.fundCode, Number(e.target.value))}
-                            />
+                            {readonly ? (
+                              <span className="text-gray-900 dark:text-[#E0E0E0] font-mono text-sm">
+                                {h.currentNav ? h.currentNav.toFixed(4) : '-'}
+                              </span>
+                            ) : (
+                              <input 
+                                type="number" step="0.0001"
+                                className="w-24 bg-gray-50 dark:bg-[#0A0A0A] border-b border-gray-300 dark:border-[#333] focus:border-[#D43F33] text-gray-900 dark:text-[#E0E0E0] px-1 py-1 text-sm font-mono outline-none text-right transition-colors"
+                                value={h.currentNav || ''}
+                                onChange={(e) => handleUpdateNav(h.fundCode, Number(e.target.value))}
+                              />
+                            )}
                           </td>
                           <td className="px-6 py-4 text-right font-mono text-gray-900 dark:text-[#E0E0E0]">{h.currentMarketValue.toFixed(2)}</td>
                           <td className="px-6 py-4 text-right font-mono text-gray-700 dark:text-[#AAA]">{h.costNav.toFixed(4)}</td>
@@ -534,17 +614,19 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
           <div className="space-y-8 animate-in fade-in duration-500">
             
             <div className="flex justify-end">
-               <button 
-                 className="bg-transparent border border-[#D43F33] text-[#D43F33] hover:bg-[#D43F33] hover:text-white dark:hover:text-[#0F0F0F] px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-bold transition-colors flex items-center gap-2 rounded-none"
-                 onClick={() => {
-                   setIsAdding(!isAdding);
-                   if (!isAdding) {
-                     setNewTx(prev => ({...prev, accountId: activeAccountId === 'all' ? accounts[0].id : activeAccountId}));
-                   }
-                 }}
-               >
-                 <Plus size={14} /> 添加记录
-               </button>
+               {!readonly && (
+                 <button 
+                   className="bg-transparent border border-[#D43F33] text-[#D43F33] hover:bg-[#D43F33] hover:text-white dark:hover:text-[#0F0F0F] px-6 py-3 text-[10px] uppercase tracking-[0.2em] font-bold transition-colors flex items-center gap-2 rounded-none"
+                   onClick={() => {
+                     setIsAdding(!isAdding);
+                     if (!isAdding) {
+                       setNewTx(prev => ({...prev, accountId: activeAccountId === 'all' ? accounts[0].id : activeAccountId}));
+                     }
+                   }}
+                 >
+                   <Plus size={14} /> 添加记录
+                 </button>
+               )}
             </div>
 
             {/* Transactions Table (Matches Screenshot 1) */}
@@ -684,13 +766,15 @@ function FundDashboard({ theme, setTheme, kvStatus, password }: { theme: 'light'
                         <td className="px-6 py-4 text-center text-gray-500 dark:text-[#888] font-mono text-sm">{t.isDividend}</td>
                         <td className="px-6 py-4 text-right text-gray-500 dark:text-[#888] font-mono text-sm">{t.cashFlow.toFixed(2)}</td>
                         <td className="px-6 py-4 text-center">
-                          <button 
-                            onClick={() => handleDelete(t.id)}
-                            className="text-gray-400 dark:text-[#444] hover:text-[#D43F33] p-2 transition-colors rounded-none opacity-0 group-hover:opacity-100"
-                            title="Delete"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {!readonly && (
+                            <button 
+                              onClick={() => handleDelete(t.id)}
+                              className="text-gray-400 dark:text-[#444] hover:text-[#D43F33] p-2 transition-colors rounded-none opacity-0 group-hover:opacity-100"
+                              title="Delete"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
